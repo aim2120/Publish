@@ -13,6 +13,10 @@ public struct CLI {
     private let publishRepositoryURL: URL
     private let publishVersion: String
 
+    enum Error: Swift.Error {
+        case invalidOptionUsage
+    }
+
     public init(arguments: [String] = CommandLine.arguments,
                 publishRepositoryURL: URL,
                 publishVersion: String) {
@@ -26,30 +30,35 @@ public struct CLI {
             return outputHelpText()
         }
 
-        switch arguments[1] {
-        case "new":
-            let generator = ProjectGenerator(
-                folder: folder,
-                publishRepositoryURL: publishRepositoryURL,
-                publishVersion: publishVersion,
-                kind: resolveProjectKind(from: arguments)
-            )
+        do {
+            switch arguments[1] {
+            case "new":
+                let generator = ProjectGenerator(
+                    folder: folder,
+                    publishRepositoryURL: publishRepositoryURL,
+                    publishVersion: publishVersion,
+                    kind: resolveProjectKind(from: arguments)
+                )
 
-            try generator.generate()
-        case "generate":
-            let generator = WebsiteGenerator(folder: folder)
-            try generator.generate()
-        case "deploy":
-            let deployer = WebsiteDeployer(folder: folder)
-            try deployer.deploy()
-        case "run":
-            let portNumber = extractPortNumber(from: arguments)
-            let runner = WebsiteRunner(folder: folder, portNumber: portNumber)
-            try runner.run()
-        default:
-            outputHelpText()
+                try generator.generate()
+            case "generate":
+                let generator = WebsiteGenerator(folder: folder)
+                try generator.generate()
+            case "deploy":
+                let deployer = WebsiteDeployer(folder: folder)
+                try deployer.deploy()
+            case "run":
+                let portNumber = extractPortNumber(from: arguments)
+                let runner = WebsiteRunner(folder: folder, portNumber: portNumber, liveReloadPath: try optionValue("--live-reload"))
+                try runner.run()
+            default:
+                outputHelpText()
+            }
+        } catch {
+            return outputHelpText()
         }
     }
+
 }
 
 private extension CLI {
@@ -68,6 +77,8 @@ private extension CLI {
         - run: Generate and run a localhost server on default port 8000
                for the website in the current folder. Use the "-p"
                or "--port" option for customizing the default port.
+               Use the "--live-reload <path>" option with a source directory
+               path to live reload your site upon source files changes.
         - deploy: Generate and deploy the website in the current
                folder, according to its deployment method.
         """)
@@ -94,5 +105,16 @@ private extension CLI {
         }
 
         return ProjectKind(rawValue: arguments[2]) ?? .website
+    }
+
+    private func optionValue(_ option: String) throws -> String? {
+        guard let optionIndex = arguments.firstIndex(of: option) else {
+            return nil
+        }
+        guard optionIndex < arguments.endIndex else {
+            throw Error.invalidOptionUsage
+        }
+        let valueIndex = arguments.index(after: optionIndex)
+        return arguments[valueIndex]
     }
 }

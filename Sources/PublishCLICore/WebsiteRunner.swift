@@ -11,6 +11,7 @@ import ShellOut
 internal struct WebsiteRunner {
     let folder: Folder
     var portNumber: Int
+    let liveReloadPath: String?
 
     func run() throws {
         let generator = WebsiteGenerator(folder: folder)
@@ -44,8 +45,42 @@ internal struct WebsiteRunner {
             exit(1)
         }
 
+        var liveReloadTask: Task<Void, Error>?
+        if let liveReloadPath {
+            let liveReloadFolder = try resolveLiveReloadFolder(liveReloadPath)
+            liveReloadTask = liveReload(in: liveReloadFolder, generator: generator)
+        }
+
         _ = readLine()
+        liveReloadTask?.cancel()
         serverProcess.terminate()
+    }
+}
+
+private extension WebsiteRunner {
+    func liveReload(in folder: Folder, generator: WebsiteGenerator) -> Task<Void, Error> {
+        Task.detached {
+            var maybePreviousChecksum: String?
+            while true {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+
+                try Task.checkCancellation()
+
+                do {
+                    let checksum = try shellOut(to: "tar -cf - \(folder.path) | md5sum")
+                    if let previousChecksum = maybePreviousChecksum, checksum != previousChecksum {
+                        maybePreviousChecksum = checksum
+                        try generator.generate()
+                    } else {
+                        maybePreviousChecksum = checksum
+                    }
+                } catch let error as ShellOutError {
+                    self.outputLiveReloadingErrorMessage(error.message)
+                } catch {
+                    self.outputLiveReloadingErrorMessage(error.localizedDescription)
+                }
+            }
+        }
     }
 }
 
@@ -53,6 +88,11 @@ private extension WebsiteRunner {
     func resolveOutputFolder() throws -> Folder {
         do { return try folder.subfolder(named: "Output") }
         catch { throw CLIError.outputFolderNotFound }
+    }
+
+    func resolveLiveReloadFolder(_ path: String) throws -> Folder {
+        do { return try folder.subfolder(at: path) }
+        catch { throw CLIError.liveReloadFolderNotFound(path) }
     }
 
     func outputServerErrorMessage(_ message: String) {
@@ -71,5 +111,9 @@ private extension WebsiteRunner {
         }
 
         fputs("\n❌ Failed to start local web server:\n\(message)\n", stderr)
+    }
+
+    func outputLiveReloadingErrorMessage(_ message: String) {
+        fputs("\n❌ Failed live reloading website:\n\(message)\n", stderr)
     }
 }
